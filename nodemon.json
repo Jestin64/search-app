@@ -1,0 +1,7 @@
+{
+    "watch": ["src"], 
+    "ext": "js,json,ts", 
+    "ignore": ["src/tests", "node_modules"], 
+    "exec": "npx ts-node --esm src/server.ts"
+  }
+  

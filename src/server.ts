@@ -1,68 +1,86 @@
 import express from "express";
-import redis from "redis";
+import * as redis from 'redis';
 import mongoose from "mongoose";
 import "dotenv/config";
+import _ from "lodash";
 
-// const Document = require('./models/document');
-// const redisClient = redis.createClient();
+const dbName = process.env.DB_NAME;
+const redisClient = redis.createClient({
+    // socket: {
+    //     host: '<hostname>',
+    //     port: '<port>'
+    // },
+    // username: '<username>',
+    // password: '<password>'
+    // url: ""
+});
+
+redisClient.on('error', err => { throw new Error(`Redis Server Error: ${err}`) });
 
 const app = express();
 app.use(express.json());
 
+// Mongoose Document Model
+const searchAppSchema = new mongoose.Schema({}, { strict: false });
+
+const SearchAppCollection = mongoose.model('search-app', searchAppSchema);
 // Connect to MongoDB and start the server
-mongoose.connect(`mongodb+srv://AaronBaron:${process.env.MONGO_PASS}@cluster0.syfka.gcp.mongodb.net/?retryWrites=true&w=majority`,{
-    dbName: "search-app",
+mongoose.connect(`mongodb+srv://AaronBaron:${process.env.MONGO_PASS}@cluster0.syfka.gcp.mongodb.net/?retryWrites=true&w=majority`, {
+    dbName,
 })
     .then(() => app.listen(3000, () => console.log('Server running at port 3000')))
     .catch((err) => {
         throw new Error(err);
-    } );
+    });
 
 
-//todo:  once mongoose is up then deprecate this
-// app.listen(3000, ()=>{
-//     console.log("server started at port 3000")
-// })
+// APIs
+// api for search query
+app.get('/api/search', async (req, res) => {
+    const searchTerm = String(req?.query?.query);
 
-// app.post('/document', async (req, res) => {
-//     const { author, date, name, text } = req.body;
+    // Check if we have it in our cache first
+    if (searchTerm) {
+        redisClient.get(searchTerm.toLowerCase())
+            .then(async (cachedData) => {
+                if (cachedData) {
+                    console.log('Fetching from cache');
+                    res.send(JSON.parse(cachedData));
+                } else {
+                    console.log('Fetching from mongodb');
+                    try {
+                        const results = await SearchAppCollection.find({ $text: { $search: searchTerm } }).lean();
+                        // Cache the results for an hour
+                        redisClient.setEx(searchTerm, 3600, JSON.stringify(results));
+                        res.send(results);
+                    } catch (err) {
+                        console.error('Failed to fetch from database', err);
+                        res.status(500).send('Server error');
+                    }
+                }
+            })
+            .catch(err => {
+                throw new Error(err);
+            })
+    }
+    else {
+        throw new Error("no search query provided")
+    }
+});
 
-//     const newDocument = new Document({
-//         author,
-//         date,
-//         name,
-//         text
-//     });
+// upload docs
+app.post('/api/document', async (req, res) => {
+    if (!req.body) return res.status(400).send('No data received');
 
-//     await newDocument.save();
-    
-//     // Invalidate the cache after a new document is added
-//     redisClient.flushDb((error, succeeded) => {
-//         console.log(succeeded); // will be true if successfull
-//     });
-
-//     res.json(newDocument);
-// });
-
-// app.get('/search', async (req, res) => {
-//     const { keyword } = req.query;
-
-//     // Try getting data from Redis cache first
-//     redisClient.get(keyword, async (err, cachedData) => {
-//         if (err) throw err;
-
-//         if (cachedData) {
-//             // If cachedData exists, send it as response
-//             res.send(JSON.parse(cachedData));
-//         } else {
-//             // If no cachedData, fetch from database and cache it
-//             const data = await Document.find({ text: { $regex: keyword } });
-            
-//             redisClient.setex(keyword, 3600, JSON.stringify(data)); // Cache for 1 hour
-
-//             res.send(data);
-//         }
-//     });
-// });
+    try {
+        const newDoc = new SearchAppCollection( { ...req.body });
+        await newDoc.save();
+        console.log(newDoc);
+        res.status(201).send(newDoc);
+    } catch (err) {
+        console.error('Failed to insert document', err);
+        res.status(500).send('Server error');
+    }
+});
 
 
