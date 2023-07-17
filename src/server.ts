@@ -37,35 +37,41 @@ mongoose.connect(`mongodb+srv://AaronBaron:${process.env.MONGO_PASS}@cluster0.sy
 // APIs
 // api for search query
 app.get('/api/search', async (req, res) => {
-    const searchTerm = String(req?.query?.query);
+    const searchTerm = String(req?.query?.search);
 
+    const results = await SearchAppCollection.find({ $text: { $search: searchTerm } }).lean();
+    console.log("search results: ", results);
+    res.send(results);
+
+    // comment: // redis isnt up for some reason so going to implement cache on the front end
     // Check if we have it in our cache first
-    if (searchTerm) {
-        redisClient.get(searchTerm.toLowerCase())
-            .then(async (cachedData) => {
-                if (cachedData) {
-                    console.log('Fetching from cache');
-                    res.send(JSON.parse(cachedData));
-                } else {
-                    console.log('Fetching from mongodb');
-                    try {
-                        const results = await SearchAppCollection.find({ $text: { $search: searchTerm } }).lean();
-                        // Cache the results for an hour
-                        redisClient.setEx(searchTerm, 3600, JSON.stringify(results));
-                        res.send(results);
-                    } catch (err) {
-                        console.error('Failed to fetch from database', err);
-                        res.status(500).send('Server error');
-                    }
-                }
-            })
-            .catch(err => {
-                throw new Error(err);
-            })
-    }
-    else {
-        throw new Error("no search query provided")
-    }
+    // if (searchTerm) {
+    //     redisClient.get(searchTerm.toLowerCase())
+    //         .then(async (cachedData) => {
+    //             if (cachedData) {
+    //                 console.log('Fetching from cache');
+    //                 res.send(JSON.parse(cachedData));
+    //             } else {
+    //                 console.log('Fetching from mongodb');
+    //                 try {
+    //                     const results = await SearchAppCollection.find({ $text: { $search: searchTerm } }).lean();
+    //                     console.log("search results: ", results)
+    //                     // Cache the results for an hour
+    //                     redisClient.setEx(searchTerm, 3600, JSON.stringify(results));
+    //                     res.send(results);
+    //                 } catch (err) {
+    //                     console.error('Failed to fetch from database', err);
+    //                     res.status(500).send('Server error');
+    //                 }
+    //             }
+    //         })
+    //         .catch(err => {
+    //             throw new Error(err);
+    //         })
+    // }
+    // else {
+    //     throw new Error("no search query provided")
+    // }
 });
 
 // upload docs
@@ -73,7 +79,7 @@ app.post('/api/document', async (req, res) => {
     if (!req.body) return res.status(400).send('No data received');
 
     try {
-        const newDoc = new SearchAppCollection( { ...req.body });
+        const newDoc = new SearchAppCollection({ ...req.body });
         await newDoc.save();
         console.log(newDoc);
         res.status(201).send(newDoc);
